@@ -1,2 +1,15 @@
-npm init -y
-npm install express mysql bcrypt
+{
+  "name": "register",
+  "version": "1.0.0",
+  "description": "A registration form served by nginx, handled by a Node.js app that stores users in MySQL",
+  "main": "reg.js",
+  "scripts": {
+    "start": "node reg.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "express": "^4.19.2",
+    "mysql": "^2.18.1"
+  }
+}
