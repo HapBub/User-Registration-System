@@ -1,73 +1,66 @@
 const mysql = require('mysql');
 const express = require('express');
-const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 
-
-// Create a MySQL connection
-const conn = mysql.createConnection({
-  host: '127.0.0.1',
-  user: 'XXXXX',
-  password: 'XXXXXXXXXX',
-  database: 'registration'
+// Database settings come from environment variables, so no credentials live in the code.
+// Example: export DB_USER=myuser DB_PASSWORD=mypassword
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || '127.0.0.1',
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME || 'registration'
 });
 
-// Connect to the MySQL server
-conn.connect((err) => {
-  if (err) throw err;
+// Fail early with a clear message if the database is unreachable
+pool.getConnection((err, connection) => {
+  if (err) {
+    console.error('Could not connect to the MySQL server:', err.message);
+    process.exit(1);
+  }
   console.log('Connected to the MySQL server');
+  connection.release();
 });
 
-// Create an Express app
-const httphandle = express();
+const app = express();
 
-// Configure the app to use body-parser for parsing request bodies
-httphandle.use(bodyParser.urlencoded({ extended: true }));
+// Parse the form data sent by registration.html
+app.use(express.urlencoded({ extended: true }));
 
-// Define a route for handling the registration form submissions
-httphandle.post('/reg.js', async (req, res) => {
+// Handle the registration form submission
+app.post('/reg.js', async (req, res) => {
   const { name, email, password } = req.body;
 
+  if (!name || !email || !password) {
+    return res.status(400).send('Name, email and password are required');
+  }
+
   try {
-    // Check if the email already exists in the database
-    const emailcheck = 'SELECT COUNT(*) as count FROM Users WHERE email = ?';
-    conn.query(emailcheck, [email], async (err, result) => {
-      if (err) throw err;
+    // Hash the password before it is stored (never store plain text)
+    const hashedPass = await bcrypt.hash(password, 10);
 
-      const emailexists = result[0].count > 0;
-
-      if (emailexists) {
-        // Email already exists, display an error message
-        res.send('Email already exists');
-      } else {
-        // Hash the password
-        const hashedpass = await bcrypt.hash(password, 10);
-
-        // Insert the user information into the Users table
-        const adduser = 'INSERT INTO Users (name, email, password) VALUES (?, ?, ?)';
-        const values = [name, email, hashedpass];
-
-        conn.query(adduser, values, (err, result) => {
-          if (err) throw err;
-          console.log('User registered successfully');
-
-          // Redirect the user to a success page or send a success response
-          res.send('Registration successful!');
-        });
+    // The UNIQUE constraint on Users.email (see schema.sql) is what prevents duplicates.
+    // Relying on it avoids the race condition of "check first, insert later".
+    const addUser = 'INSERT INTO Users (name, email, password) VALUES (?, ?, ?)';
+    pool.query(addUser, [name, email, hashedPass], (err) => {
+      if (err) {
+        if (err.code === 'ER_DUP_ENTRY') {
+          return res.status(409).send('Email already exists');
+        }
+        console.error(err);
+        return res.status(500).send('Registration failed!');
       }
+
+      console.log('User registered successfully');
+      res.send('Registration successful!');
     });
   } catch (error) {
-    // Handle any errors
-    console.log(error);
-    res.send('Registration failed!');
+    console.error(error);
+    res.status(500).send('Registration failed!');
   }
 });
 
-
 // Start the server
-httphandle.listen(44444, () => {
-  console.log('Server started on port 44444');
+const PORT = process.env.PORT || 44444;
+app.listen(PORT, () => {
+  console.log(`Server started on port ${PORT}`);
 });
-
-
-
